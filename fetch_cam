@@ -1,0 +1,126 @@
+#!/bin/sh
+
+basedir=/share/media/Cameras
+rate=1000
+
+usage() {
+  echo "usage: ${0##*/} [-h|-d|-t|-v] [-r rate] [-D yyyymmdd] [-l save_location ] camera"
+  echo "	-h		: This help text"
+  echo "	-d		: Print debugging information"
+  echo "	-t		: Print files to be downloaded; do not download"
+  echo "	-v		: Print variables and exit"
+  echo "	-r rate		: Limit downloads to rate kbps (default: $rate; 0: no limit)"
+  echo "	-D yyyymmdd	: Download files from yyyymmdd"
+  echo "			  (default: yesterday until 12:15 AM; then today)"
+  echo "	-l save_location	: Save files to save_location"
+  echo "			  (default: $basedir/_camera_/_yyyymmdd_)"
+  echo "	camera		: Either 'frontdoorcam', 'garagecam', 'shedcam', 'backyardcam', or 'chimneycam'"
+  echo "			  (must be last on the command line)"
+  exit 1
+}
+
+debug=0
+rate=0
+dotest=0
+verbose=0
+dateymd=$(date "+%Y%m%d")
+
+while getopts ":hdtvr:D:l:" opt; do
+  case $opt in
+    d)
+      debug=1
+      ;;
+    t)
+      dotest=1
+      ;;
+    r)
+      rate=$OPTARG
+      ;;
+    D)
+      dateymd=$OPTARG
+      ;;
+    l)
+      basedir=$OPTARG
+      ;;
+    v)
+      verbose=1
+      ;;
+    h|\?) usage
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+[ "$1" != "frontdoorcam" -a "$1" != "garagecam" -a "$1" != "shedcam" -a "$1" != "backyardcam" -a "$1" != "chimneycam" ] && echo "Error: Invalid camera" && usage
+camera="$1"
+
+echo $dateymd | grep -Eq "^[0-9]{8}$" || { echo "Error: Invalid date ($dateymd)" ; usage; }
+echo $rate | grep -Eq "^[0-9]+$" && [ $rate -ge 0 -a $rate -le 1000000 ] || { echo "Error: Invalid rate ($rate)"; usage; }
+
+if [ "$rate" = 0 ]; then
+  limiter=""
+else
+  limiter="--limit-rate ${rate}k"
+fi
+
+videos=$basedir/$camera/$dateymd
+mkdir -p $videos 2> /dev/null || { echo "Error: Cannot use $basedir" ; usage; }
+
+if [ $debug = 1 -o $verbose = 1 ]; then
+  [ $debug = 1 ] && printf "DEBUG: "
+  echo "camera='$camera'"
+  [ $debug = 1 ] && printf "DEBUG: "
+  echo "limiter='$limiter'"
+  [ $debug = 1 ] && printf "DEBUG: "
+  echo "dateymd='$dateymd'"
+  [ $debug = 1 ] && printf "DEBUG: "
+  echo "basedir='$basedir'"
+  [ $verbose = 1 ] && exit
+fi
+
+if [ $(date "+%H") = "00" -a $(date "+%M") -lt 15 ]; then
+  dateymd=$(date -d yesterday "+%Y%m%d")
+  [ $debug = 1 ] && echo "DEBUG: Between midnight and 00:15, fetching yesterday's videos ($dateymd)"
+fi
+
+down=$basedir/.download/$camera/$dateymd
+tmpdir=$basedir/.tmpdir/$camera
+badfiles=$basedir/.badfiles/$camera
+mkdir -p $down $videos $videos/.thumbs $tmpdir
+
+for dir in $(curl -sn $limiter $rate http://$camera.erdely.in/sd/$dateymd/ | awk -F '"' '/^<tr>/ && $2 ~ /^\/sd\/[0-9]{8}\/record[0-9]{3}\/$/ {print $2}')
+do
+  [ $debug = 1 ] && echo "DEBUG: Processing $dir"
+  for file in $(curl -sn $limiter $rate http://$camera.erdely.in$dir | awk -F '"' '/^<tr>/{print $2}')
+  do
+    [ $dotest = 1 ] && echo $file && continue
+    [ $debug = 1 ] && echo "DEBUG: Processing $file"
+    base=$(basename $file .264)
+    begtime=$(echo $file | cut -d_ -f2)
+    timepart=$(echo $file | cut -d_ -f3)
+    first=$(echo $base | cut -b1)
+    rest=$(echo $base | cut -b2-)
+    motion=""
+    [ $first = "A" ] && motion=" Motion"
+
+    if [ ! -f $down/$base.264 -a $timepart != "999999.264" ]; then
+      echo $base
+      curl -n $limiter -o $tmpdir/$base.264 http://$camera.erdely.in$file
+      [ $? = 0 ] && touch $down/$base.264
+      # [ $? = 0 ] && ffmpeg -framerate 24 -i $tmpdir/$base.264 -metadata title="$camera $dateymd $begtime$motion" -c copy $tmpdir/$base.mp4
+      [ $? = 0 ] && convert_ipcam_video -y -i $tmpdir/$base.264 -t "$camera $dateymd $begtime$motion" $tmpdir/$base.mp4
+      [ $? = 0 ] && ffmpeg -y -i $tmpdir/$base.264 -vf "select=eq(n\,1)" -vframes 1 -s 640x360 $videos/.thumbs/${rest}_$first.png
+      if [ $? = 0 ]; then
+        echo Saving $base.264 as $videos/${rest}_$first.mp4 && mv $tmpdir/$base.mp4 $videos/${rest}_$first.mp4
+        rm $tmpdir/$base.264
+      else
+        mkdir -p $badfiles
+        [ -s $tmpdir/$base.mp4 ] && echo Saving $base.264 as $videos/${rest}_$first.mp4 && mv $tmpdir/$base.mp4 $videos/${rest}_$first.mp4
+        echo Saving possibly bad $base.264 to $badfiles && mv $tmpdir/$base.264 $badfiles
+      fi
+    else
+      [ $debug = 1 -a $timepart = "999999.264" ] && echo "DEBUG: Skipping currently written file"
+      [ $debug = 1 -a -f $down/$base.264 ] && echo "DEBUG: Skipping already downloaded file"
+    fi
+  done
+done

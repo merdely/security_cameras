@@ -1,0 +1,74 @@
+#!/bin/sh
+
+which fix264vid > /dev/null 2>&1
+[ $? != 0 ] && echo "Cannot find fix264vid (install from https://svn.erdely.in/filedetails.php?repname=Home&path=%2Ftrunk%2Fscripts%2Ffix264vid%2Ffix264vid.c)" && exit 1
+
+which ffmpeg > /dev/null 2>&1
+[ $? != 0 ] && echo "Cannot find ffmpeg" && exit 1
+
+which mkvmerge > /dev/null 2>&1
+[ $? != 0 ] && echo "Cannot find mkvmerge (install the mkvtoolnix package)" && exit 1
+
+usage() {
+  echo "usage: ${0##*/} [-h|-y] [-t title] -i input.264 outputfile"
+  echo "        -h              : This help text"
+  echo "        -y              : Overwrite output files without asking"
+  echo "        -i input.264    : Video to convert (must end in .264)"
+  echo "        -t video_title  : Add 'video_title' to the title metadata"
+  exit 1
+}
+
+unset input_file
+title_command=''
+video_title=''
+overwrite=0
+
+while getopts ":hyi:t:" opt; do
+  case $opt in
+    y)
+      overwrite=1
+      ;;
+    i)
+      input_file="$OPTARG"
+      ;;
+    t)
+      title_command="-metadata title="
+      video_title="$OPTARG"
+      ;;
+    h|\?) usage
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+[ -z "$1" -o -z "$input_file" ] && usage
+[ $(basename $input_file) != $(basename $input_file .264).264 ] && echo "Error: video file must be a .264 file from an IP Camera" && exit 1
+
+if [ $overwrite = 0 ] && [ -e "$1" ]; then
+  printf "File '%s' already exists. Overwrite ? [y/N] " "$1"
+  read user_input
+  [ "$user_input" != "Y" -a "$user_input" != "y" ] && exit 0
+fi
+
+workdir=$(mktemp -d /tmp/fix264.XXXXXXXXXXXXXXXXX)
+dirname=$(dirname $(readlink -f $input_file))
+basename=$(basename $input_file .264)
+
+# Must change to workdir since fix264vid saves file to pwd
+(
+  cd $workdir
+  # Extract audio/video files while removing "magic" garbage
+  fix264vid "$dirname/$basename.264"
+  # Convert WAV to MP3
+  ffmpeg -i $basename.wav -y $basename.mp3
+  # Merge h264 video and mp3 file into an mkv file
+  mkvmerge --output $basename.mkv --timestamps "0:$basename.video.ts.txt" $basename.h264 $basename.mp3
+)
+
+# Convert mkv file into mp4
+# Reprocess to convert to yuv420p
+# ffmpeg -i $workdir/$basename.mkv -strict -1 -pix_fmt yuv420p $video_title $basename.mp4
+rm -f "$1"
+ffmpeg -i $workdir/$basename.mkv -strict -1 $title_command"$video_title" -c copy "$1"
+
+rm -Rf $workdir
