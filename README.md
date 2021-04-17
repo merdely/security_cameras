@@ -25,3 +25,7 @@ I have a cronjob to set the time for the cameras:
 ```
 */5 * * * * /usr/bin/curl -n -s -d "cmd=setservertime&-time=$(date +\%Y.\%m.\%d.\%H.\%M.\%S)&-timezone=America/New_York" http://HOSTNAME_OF_CAMERA/web/cgi-bin/hi3510/param.cgi 2>&1 > /dev/null
 ```
+
+## Cleaning up older files
+
+The cam_cleanup script is important to make sure your video files don't fill up your disk. I haven't used this script in while since upgrading my disks but will clean it up and start using it soon-ish

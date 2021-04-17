@@ -1,0 +1,128 @@
+#!/bin/sh
+
+days_keep=10
+days_prune=21
+basedir=/share/media/Cameras
+
+usage() {
+  echo "usage: ${0##*/} [-h|-d|-t|-v] [-m] [ -P prune_days ] [-D days_keep] [-l location ]"
+  echo "	-h		: This help text"
+  echo "	-d		: Print debugging information"
+  echo "	-t		: Print files to be deleted; do not delete"
+  echo "	-v		: Print variables and exit"
+  echo "	-m		: Move instead of delete (move to $basedir/deleted)"
+  echo "	-D days		: # days to keep all videos (default: $days_keep)"
+  echo "	-P days		: # days to keep activity videos (default: $days_prune; 0: don't prune)"
+  echo "	-l location	: Camera location (default: $basedir)"
+  exit 1
+}
+
+debug=0
+dotest=0
+move=0
+verbose=0
+
+while getopts ":hdtvmD:P:l:" opt; do
+  case $opt in
+    d)
+      debug=1
+      ;;
+    t)
+      dotest=1
+      ;;
+    m)
+      move=1
+      ;;
+    D)
+      days_keep=$OPTARG
+      ;;
+    P)
+      days_prune=$OPTARG
+      ;;
+    l)
+      basedir=$OPTARG
+      ;;
+    v)
+      verbose=1
+      ;;
+    h|\?) usage
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+for cam in $basedir/*cam; do
+  [ ! -d $cam ] && continue
+  [ $debug = 1 ] && echo "DEBUG: Processing $cam"
+
+  if [ $days_prune != 0 ]; then
+    stop=0
+    day=$days_prune
+    while [ $stop = 0 ]; do
+      deletepoint=$(date -d "$day days ago" "+%Y%m%d")
+      [ $debug = 1 ] && echo "DEBUG: Processing $cam/$deletepoint for Pruning"
+      if [ ! -d $cam/$deletepoint ]; then
+        stop=1
+      else
+        if [ $move = 1 ]; then
+          destdir=$basedir/deleted/$(basename $cam)
+          mkdir -p $destdir
+          [ $debug = 1 ] && echo "DEBUG: Moving $cam/$deletepoint to $destdir"
+          [ $dotest = 0 ] && mv $cam/$deletepoint $destdir
+        else
+          [ $debug = 1 ] && echo "DEBUG: Deleting $cam/$deletepoint"
+          [ $dotest = 0 ] && rm -Rf $cam/$deletepoint
+        fi
+      fi
+      day=$((day + 1))
+    done
+  fi
+
+  stop=0
+  day=$days_keep
+  unset keep_list
+  while [ $stop = 0 ]; do
+    deletepoint=$(date -d "$day days ago" "+%Y%m%d")
+    [ $debug = 1 ] && echo "DEBUG: Processing $cam/$deletepoint"
+    if [ ! -d $cam/$deletepoint ]; then
+      stop=1
+    else
+      [ $debug = 1 ] && echo "DEBUG: Processing $cam/$deletepoint/*.mp4"
+
+      for file in $(/bin/ls -1 $cam/$deletepoint/*.mp4 2> /dev/null); do
+        if [ $(echo $file | rev | cut -b 1-6) = "4pm.A_" ]; then
+          if [ -n "$previous" ] && [ $(echo $previous | rev | cut -b 1-6) != "4pm.A_" ]; then
+            [ $debug = 1 ] && echo "DEBUG: Keeping $previous"
+            keep_list="$keep_list $previous"
+          fi
+          [ $debug = 1 ] && echo "DEBUG: Keeping $file"
+          keep_list="$keep_list $file"
+        else
+          if [ -n "$previous" ] && [ $(echo $previous | rev | cut -b 1-6) = "4pm.A_" ]; then
+            [ $debug = 1 ] && echo "DEBUG: Keeping $file"
+            keep_list="$keep_list $file"
+          fi
+        fi
+        previous=$file
+      done
+      for file in $(/bin/ls -1 $cam/$deletepoint/*.mp4 2> /dev/null); do
+        if echo " $keep_list " | grep -qEv " $file "; then
+          if [ $move = 1 ]; then
+            destdir=$basedir/deleted/$(basename $cam)/$deletepoint
+            [ $debug = 1 ] && echo "DEBUG: Moving $file to $destdir"
+            if [ $dotest = 0 ]; then
+              mkdir -p $destdir
+              mv $file $destdir
+            fi
+          else
+            [ $debug = 1 ] && echo "DEBUG: Deleting $file"
+            [ $dotest = 0 ] && rm $file
+          fi
+        fi
+      done
+
+      day=$((day + 1))
+    fi
+  done
+done
+
