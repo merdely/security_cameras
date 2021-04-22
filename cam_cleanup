@@ -11,7 +11,7 @@ usage() {
   echo "	-t		: Print files to be deleted; do not delete"
   echo "	-v		: Print variables and exit"
   echo "	-m		: Move instead of delete (move to $basedir/deleted)"
-  echo "	-D DAYS_DELETE	: Remove ALL videos older than DAYS_DELETE (default: $days_delete)"
+  echo "	-D DAYS_DELETE	: Remove ALL videos older than DAYS_DELETE (default: $days_delete; 0: don't delete)"
   echo "	-C DAYS_CLEAN	: Remove non-activity videos older than DAYS_CLEAN (default: $days_clean; 0: don't clean)"
   echo "	-l location	: Camera location (default: $basedir)"
   exit 1
@@ -53,7 +53,7 @@ while getopts ":hdtvmD:C:l:" opt; do
 done
 shift $((OPTIND -1))
 
-if [ $days_delete -lt $days_clean ]; then
+if [ $days_delete != 0 ] && [ $days_delete -lt $days_clean ]; then
   echo "Warning: No directories will be cleaned because DAYS_DELETE is less than DAYS_CLEAN"
   sleep 5
 fi
@@ -78,6 +78,7 @@ for cam in $basedir/*cam; do
 
     # Starting at DAYS_DELETE, delete the directory, increment and delete the next older
     # Until a directory doesn't exist with that date string
+  if [ $days_delete != 0 ]; then
     stophere=0
     day=$days_delete
     while [ $stophere = 0 ]; do
@@ -98,6 +99,7 @@ for cam in $basedir/*cam; do
       fi
       day=$((day + 1))  # One day older
     done
+  fi
 
   # Starting at DAYS_CLEAN, delete all "P" files (no activity) unless they preceed or
   # follow an "A" file (activity)
