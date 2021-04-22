@@ -5,12 +5,13 @@ days_clean=120   # four months
 basedir=/share/media/Cameras
 
 usage() {
-  echo "usage: ${0##*/} [-h|-d|-t|-v] [-m] [-D DAYS_DELETE] [-C DAYS_CLEAN] [-l location]"
+  echo "usage: ${0##*/} [-h|-d|-t|-v] [-m] [-T] [-D DAYS_DELETE] [-C DAYS_CLEAN] [-l location]"
   echo "	-h		: This help text"
   echo "	-d		: Print debugging information"
   echo "	-t		: Print files to be deleted; do not delete"
   echo "	-v		: Print variables and exit"
   echo "	-m		: Move instead of delete (move to $basedir/deleted)"
+  echo "	-T		: Do not delete thumbnails associated with videos being deleted (default: delete thumbnails)"
   echo "	-D DAYS_DELETE	: Remove ALL videos older than DAYS_DELETE (default: $days_delete; 0: don't delete)"
   echo "	-C DAYS_CLEAN	: Remove non-activity videos older than DAYS_CLEAN (default: $days_clean; 0: don't clean)"
   echo "	-l location	: Camera location (default: $basedir)"
@@ -21,8 +22,9 @@ debug=0
 dotest=0
 move=0
 verbose=0
+delete_thumbs=1
 
-while getopts ":hdtvmD:C:l:" opt; do
+while getopts ":hdtvmTD:C:l:" opt; do
   case $opt in
     d)
       debug=1
@@ -32,6 +34,9 @@ while getopts ":hdtvmD:C:l:" opt; do
       ;;
     m)
       move=1
+      ;;
+    T)
+      delete_thumbs=0
       ;;
     D)
       printf "$OPTARG" | grep -Eq "^[0-9]+$" || { echo "Error: Value for DAYS_DELETE must be an integer"; exit 1; }
@@ -111,6 +116,7 @@ for cam in $basedir/*cam; do
       skipnext=0
       unset previous
       unset delete_list
+      unset thumb_list
       deletepoint=$(date -d "$day days ago" "+%Y%m%d")
       [ -d $cam/$deletepoint ] && [ $debug = 1 ] && echo "DEBUG: Cleaning $cam/$deletepoint"
       if [ ! -d $cam/$deletepoint ]; then
@@ -119,12 +125,15 @@ for cam in $basedir/*cam; do
         [ $debug = 1 ] && echo "DEBUG: Processing $cam/$deletepoint/*.mp4"
 
         for file in $(/bin/ls -1 $cam/$deletepoint/*.mp4 | sort -n 2> /dev/null); do
+          thumb=$(dirname $file)/.thumbs/$(basename $file .mp4).png
           # If "A" file, remove previous from delete_list and skip the next file
           if echo "$file" | grep -q "_A\.mp4$"; then
             [ $debug = 1 ] && echo "DEBUG: Not adding $file to delete_list"
             if [ -n "$previous" ]; then
+              pthumb=$(dirname $previous)/.thumbs/$(basename $previous .mp4).png
               old_dl="$delete_list"
               delete_list=$(echo "$delete_list" | sed "s^ $previous^^")
+              thumb_list=$(echo "$thumb_list" | sed "s^ $pthumb^^")
               [ "$old_dl" != "$delete_list" ] && [ $debug = 1 ] && echo "DEBUG: Removing $previous from delete_list"
             fi
             skipnext=1
@@ -136,6 +145,7 @@ for cam in $basedir/*cam; do
           else
             [ $debug = 1 ] && echo "DEBUG: Adding $file to delete_list"
             delete_list="$delete_list $file"
+            thumb_list="$thumb_list $thumb"
           fi
           previous=$file
         done
@@ -147,10 +157,15 @@ for cam in $basedir/*cam; do
           if [ $dotest = 0 ]; then
             mkdir -p $destdir
             mv $delete_list $destdir
+            if [ $delete_thumbs = 1 ]; then
+              mkdir -p $destdir/.thumbs
+              mv $thumb_list $destdir/.thumbs
+            fi
           fi
         else
           [ $debug = 1 ] && echo "DEBUG: Deleting files"
           [ $dotest = 0 ] && rm $delete_list
+          [ $dotest = 0 ] && [ $delete_thumbs = 1 ] && rm $thumb_list
         fi
 
         day=$((day + 1))
