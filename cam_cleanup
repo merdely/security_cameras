@@ -124,6 +124,7 @@ for cam in $basedir/*cam; do
       else
         [ $debug = 1 ] && echo "DEBUG: Processing $cam/$deletepoint/*.mp4"
 
+        [ $(/bin/ls -1 $cam/$deletepoint/*.mp4 2>/dev/null | wc -l) -gt 0 ] || continue
         for file in $(/bin/ls -1 $cam/$deletepoint/*.mp4 | sort -n 2> /dev/null); do
           thumb=$(dirname $file)/.thumbs/$(basename $file .mp4).png
           # If "A" file, remove previous from delete_list and skip the next file
@@ -150,22 +151,24 @@ for cam in $basedir/*cam; do
           previous=$file
         done
 
-        [ -n "$delete_list" ] && [ $debug = 1 ] && echo "DEBUG: Cleaning files: $delete_list"
-        if [ $move = 1 ]; then
-          destdir=$basedir/deleted/$(basename $cam)/$deletepoint
-          [ $debug = 1 ] && echo "DEBUG: Moving files to $destdir"
-          if [ $dotest = 0 ]; then
-            mkdir -p $destdir
-            mv $delete_list $destdir
-            if [ $delete_thumbs = 1 ]; then
-              mkdir -p $destdir/.thumbs
-              mv $thumb_list $destdir/.thumbs
+        if [ -n "$delete_list" ]; then
+          [ $debug = 1 ] && echo "DEBUG: Cleaning files: $delete_list"
+          if [ $move = 1 ]; then
+            destdir=$basedir/deleted/$(basename $cam)/$deletepoint
+            [ $debug = 1 ] && echo "DEBUG: Moving files to $destdir"
+            if [ $dotest = 0 ]; then
+              mkdir -p $destdir
+              mv $delete_list $destdir
+              if [ $delete_thumbs = 1 ]; then
+                mkdir -p $destdir/.thumbs
+                mv $thumb_list $destdir/.thumbs
+              fi
             fi
+          else
+            [ $debug = 1 ] && echo "DEBUG: Deleting files"
+            [ $dotest = 0 ] && rm $delete_list
+            [ $dotest = 0 ] && [ $delete_thumbs = 1 ] && rm $thumb_list
           fi
-        else
-          [ $debug = 1 ] && echo "DEBUG: Deleting files"
-          [ $dotest = 0 ] && rm $delete_list
-          [ $dotest = 0 ] && [ $delete_thumbs = 1 ] && rm $thumb_list
         fi
 
         day=$((day + 1))
