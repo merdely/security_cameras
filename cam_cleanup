@@ -124,7 +124,11 @@ for cam in $basedir/*cam; do
       else
         [ $debug = 1 ] && echo "DEBUG: Processing $cam/$deletepoint/*.mp4"
 
-        [ $(/bin/ls -1 $cam/$deletepoint/*.mp4 2>/dev/null | wc -l) -gt 0 ] || continue
+        if [ $(/bin/ls -1 $cam/$deletepoint/*.mp4 2>/dev/null | wc -l) = 0 ]; then
+          day=$((day + 1))
+          continue
+        fi
+
         for file in $(/bin/ls -1 $cam/$deletepoint/*.mp4 | sort -n 2> /dev/null); do
           thumb=$(dirname $file)/.thumbs/$(basename $file .mp4).png
           # If "A" file, remove previous from delete_list and skip the next file
